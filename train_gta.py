@@ -36,7 +36,6 @@ from gta.utils.utils import (
     load_state,
     set_random_seed,
 )
-#这是git一个测试
 
 parser = argparse.ArgumentParser(description="Semi-Supervised Semantic Segmentation")
 parser.add_argument("--config", type=str, default="config.yaml")
