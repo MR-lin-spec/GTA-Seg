@@ -27,7 +27,6 @@ class voc_dset(BaseDataset):
         elif len(self.list_sample) < n_sup and split == "train":
             num_repeat = math.ceil(n_sup / len(self.list_sample))
             self.list_sample = self.list_sample * num_repeat
-
             self.list_sample_new = random.sample(self.list_sample, n_sup)
         else:
             self.list_sample_new = self.list_sample
@@ -73,16 +72,16 @@ def build_transfrom(cfg):
 
 def build_vocloader(split, all_cfg, seed=0):
     cfg_dset = all_cfg["dataset"]
-
     cfg = copy.deepcopy(cfg_dset)
     cfg.update(cfg.get(split, {}))
 
     workers = cfg.get("workers", 2)
     batch_size = cfg.get("batch_size", 1)
     n_sup = cfg.get("n_sup", 10582)
+
     # build transform
     trs_form = build_transfrom(cfg)
-    dset = voc_dset(cfg["data_root"], cfg["data_list"], trs_form, seed, n_sup)
+    dset = voc_dset(cfg["data_root"], cfg["data_list"], trs_form, seed, n_sup, split)
 
     # build sampler
     sample = DistributedSampler(dset)
@@ -100,7 +99,6 @@ def build_vocloader(split, all_cfg, seed=0):
 
 def build_voc_semi_loader(split, all_cfg, seed=0):
     cfg_dset = all_cfg["dataset"]
-
     cfg = copy.deepcopy(cfg_dset)
     cfg.update(cfg.get(split, {}))
 
