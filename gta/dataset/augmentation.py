@@ -1,4 +1,4 @@
-import collections
+import collections.abc
 import math
 import numbers
 import random
@@ -118,7 +118,7 @@ class Resize(object):
     """
 
     def __init__(self, size):
-        assert isinstance(size, collections.Iterable) and len(size) == 2
+        assert isinstance(size, collections.abc.Iterable) and len(size) == 2
         self.size = size
 
     def __call__(self, image, label):
@@ -162,9 +162,9 @@ class RandResize(object):
     """
 
     def __init__(self, scale, aspect_ratio=None):
-        assert isinstance(scale, collections.Iterable) and len(scale) == 2
+        assert isinstance(scale, collections.abc.Iterable) and len(scale) == 2
         if (
-            isinstance(scale, collections.Iterable)
+            isinstance(scale, collections.abc.Iterable)
             and len(scale) == 2
             and isinstance(scale[0], numbers.Number)
             and isinstance(scale[1], numbers.Number)
@@ -175,7 +175,7 @@ class RandResize(object):
         if aspect_ratio is None:
             self.aspect_ratio = aspect_ratio
         elif (
-            isinstance(aspect_ratio, collections.Iterable)
+            isinstance(aspect_ratio, collections.abc.Iterable)
             and len(aspect_ratio) == 2
             and isinstance(aspect_ratio[0], numbers.Number)
             and isinstance(aspect_ratio[1], numbers.Number)
@@ -223,7 +223,7 @@ class Crop(object):
             self.crop_h = size
             self.crop_w = size
         elif (
-            isinstance(size, collections.Iterable)
+            isinstance(size, collections.abc.Iterable)
             and len(size) == 2
             and isinstance(size[0], int)
             and isinstance(size[1], int)
@@ -272,7 +272,7 @@ class RandRotate(object):
     """
 
     def __init__(self, rotate, ignore_label=255):
-        assert isinstance(rotate, collections.Iterable) and len(rotate) == 2
+        assert isinstance(rotate, collections.abc.Iterable) and len(rotate) == 2
         if isinstance(rotate[0], numbers.Number) and isinstance(
             rotate[1], numbers.Number
         ):
