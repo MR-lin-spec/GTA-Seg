@@ -1,0 +1,5 @@
+这里split.py是我划分VOC数据集后的脚本，不过划分后的路径我改为了\DeepLearning_linux\Projrcts\GTA-Seg\data\split_pascal
+
+按照下列要求修改文件
+
+1：修改pascal_voc.py，使得其满足划分后的脚本模板文件路径要求
