@@ -15,6 +15,8 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import yaml
 from tensorboardX import SummaryWriter
+from torchvision.utils import make_grid
+from torch.cuda.amp import GradScaler, autocast
 
 from gta.dataset.augmentation import generate_unsup_data
 from gta.dataset.builder import get_loader
@@ -196,6 +198,9 @@ def main():
         cfg_trainer, len(train_loader_sup), optimizer, start_epoch=last_epoch
     )
 
+    # 初始化GradScaler用于混合精度训练
+    scaler =torch.amp.GradScaler('cuda')
+
     # 开始训练模型
     for epoch in range(last_epoch, cfg_trainer["epochs"]):
         # 训练
@@ -212,6 +217,7 @@ def main():
             epoch,
             tb_logger,
             logger,
+            scaler,
         )
 
         # 验证
@@ -245,7 +251,7 @@ def main():
                 )
                 tb_logger.add_scalar("mIoU val", prec, epoch)
 
-def train(
+def train_logfail(
     model,
     model_teacher,
     model_ta,
@@ -258,6 +264,7 @@ def train(
     epoch,
     tb_logger,
     logger,
+    scaler,
 ):
     global prototype
     ema_decay_origin = cfg["net"]["ema_decay"]
@@ -301,17 +308,18 @@ def train(
         if epoch < cfg["trainer"].get("sup_only_epoch", 1):
             contra_flag = "none"
             # 前向传播
-            outs = model(image_l)
-            pred, rep = outs["pred"], outs["rep"]
-            pred = F.interpolate(pred, (h, w), mode="bilinear", align_corners=True)
+            with torch.amp.autocast('cuda'):
+                outs = model(image_l)
+                pred, rep = outs["pred"], outs["rep"]
+                pred = F.interpolate(pred, (h, w), mode="bilinear", align_corners=True)
 
-            # 监督损失
-            if "aux_loss" in cfg["net"].keys():
-                aux = outs["aux"]
-                aux = F.interpolate(aux, (h, w), mode="bilinear", align_corners=True)
-                sup_loss = sup_loss_fn([pred, aux], label_l) + 0 * rep.sum()
-            else:
-                sup_loss = sup_loss_fn(pred, label_l) + 0 * rep.sum()
+                # 监督损失
+                if "aux_loss" in cfg["net"].keys():
+                    aux = outs["aux"]
+                    aux = F.interpolate(aux, (h, w), mode="bilinear", align_corners=True)
+                    sup_loss = sup_loss_fn([pred, aux], label_l) + 0 * rep.sum()
+                else:
+                    sup_loss = sup_loss_fn(pred, label_l) + 0 * rep.sum()
 
             model_teacher.train()
             _ = model_teacher(image_l)
@@ -390,19 +398,21 @@ def train(
                 )
 
             # 无监督损失
-            unsup_loss = (
-                compute_unsupervised_loss_conf_weight(
-                    pred_a_u_large,
-                    label_u_aug.clone(),
-                    cfg["trainer"]["unsupervised"].get("drop_percent", 100),
-                    pred_u_large_teacher.detach(),
-                )
-                * cfg["trainer"]["unsupervised"].get("loss_weight", 1)
-            ) + 0.0 * rep_a_all.sum()
+            with torch.amp.autocast('cuda'):
+                unsup_loss = (
+                    compute_unsupervised_loss_conf_weight(
+                        pred_a_u_large,
+                        label_u_aug.clone(),
+                        cfg["trainer"]["unsupervised"].get("drop_percent", 100),
+                        pred_u_large_teacher.detach(),
+                    )
+                    * cfg["trainer"]["unsupervised"].get("loss_weight", 1)
+                ) + 0.0 * rep_a_all.sum()
 
             optimizer_ta.zero_grad()
-            unsup_loss.backward()
-            optimizer_ta.step()
+            scaler.scale(unsup_loss).backward()
+            scaler.step(optimizer_ta)
+            scaler.update()
 
             model.eval()
             with torch.no_grad():
@@ -440,14 +450,17 @@ def train(
             if "aux_loss" in cfg["net"].keys():
                 aux = outs["aux"][:num_labeled]
                 aux = F.interpolate(aux, (h, w), mode="bilinear", align_corners=True)
-                sup_loss = sup_loss_fn([pred_l_large, aux], label_l.clone()) + 0 * rep_all.sum()
+                with torch.amp.autocast('cuda'):
+                    sup_loss = sup_loss_fn([pred_l_large, aux], label_l.clone()) + 0 * rep_all.sum()
             else:
-                sup_loss = sup_loss_fn(pred_l_large, label_l.clone()) + 0 * rep_all.sum()
+                with torch.amp.autocast('cuda'):
+                    sup_loss = sup_loss_fn(pred_l_large, label_l.clone()) + 0 * rep_all.sum()
 
         # 反向传播并更新参数
         optimizer.zero_grad()
-        sup_loss.backward()
-        optimizer.step()
+        scaler.scale(sup_loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         # 使用EMA更新教师模型
         if epoch >= cfg["trainer"].get("sup_only_epoch", 1):
@@ -516,6 +529,295 @@ def train(
             tb_logger.add_image('Train Images', grid_image, i_iter)
             grid_pred = make_grid(F.interpolate(pred_l_large[:4], scale_factor=4).max(1)[1].unsqueeze(1).float() / cfg["net"]["num_classes"], nrow=2, normalize=True)
             tb_logger.add_image('Train Predictions', grid_pred, i_iter)
+
+def train(
+    model,
+    model_teacher,
+    model_ta,
+    optimizer,
+    optimizer_ta,
+    lr_scheduler,
+    sup_loss_fn,
+    loader_l,
+    loader_u,
+    epoch,
+    tb_logger,
+    logger,
+    scaler,
+):
+    global prototype
+    ema_decay_origin = cfg["net"]["ema_decay"]
+
+    model.train()
+
+    loader_l.sampler.set_epoch(epoch)
+    loader_u.sampler.set_epoch(epoch)
+    loader_l_iter = iter(loader_l)
+    loader_u_iter = iter(loader_u)
+    assert len(loader_l) == len(
+        loader_u
+    ), f"标注数据 {len(loader_l)} 未标注数据 {len(loader_u)}, 数据不平衡!"
+
+    rank, world_size = dist.get_rank(), dist.get_world_size()
+
+    sup_losses = AverageMeter(10)
+    uns_losses = AverageMeter(10)
+    con_losses = AverageMeter(10)
+    data_times = AverageMeter(10)
+    batch_times = AverageMeter(10)
+    learning_rates = AverageMeter(10)
+
+    batch_end = time.time()
+    for step in range(len(loader_l)):
+        batch_start = time.time()
+        data_times.update(batch_start - batch_end)
+
+        i_iter = epoch * len(loader_l) + step
+        lr = lr_scheduler.get_lr()
+        learning_rates.update(lr[0])
+        lr_scheduler.step()
+
+        image_l, label_l = next(loader_l_iter)
+        batch_size, h, w = label_l.size()
+        image_l, label_l = image_l.cuda(), label_l.cuda()
+
+        image_u, _ = next(loader_u_iter)
+        image_u = image_u.cuda()
+
+        if epoch < cfg["trainer"].get("sup_only_epoch", 1):
+            contra_flag = "none"
+            # 前向传播
+            with torch.amp.autocast('cuda'):
+                outs = model(image_l)
+                pred, rep = outs["pred"], outs["rep"]
+                pred = F.interpolate(pred, (h, w), mode="bilinear", align_corners=True)
+
+                # 监督损失
+                if "aux_loss" in cfg["net"].keys():
+                    aux = outs["aux"]
+                    aux = F.interpolate(aux, (h, w), mode="bilinear", align_corners=True)
+                    sup_loss = sup_loss_fn([pred, aux], label_l) + 0 * rep.sum()
+                else:
+                    sup_loss = sup_loss_fn(pred, label_l) + 0 * rep.sum()
+
+            model_teacher.train()
+            _ = model_teacher(image_l)
+            model_ta.train()
+            _ = model_ta(image_l)
+
+            unsup_loss = 0 * rep.sum()
+            contra_loss = 0 * rep.sum()
+            
+            # 为监督训练阶段准备可视化变量
+            pred_l_large = pred  # 使用当前预测作为pred_l_large
+        else:
+            if epoch == cfg["trainer"].get("sup_only_epoch", 1):
+                # 将学生参数复制到教师模型
+                with torch.no_grad():
+                    for t_params, s_params in zip(
+                        model_teacher.parameters(), model.parameters()
+                    ):
+                        t_params.data = s_params.data
+
+                    for t_params, s_params in zip(
+                        model_ta.parameters(), model.parameters()
+                    ):
+                        t_params.data = s_params.data
+
+            # 生成伪标签
+            model_teacher.eval()
+            pred_u_teacher = model_teacher(image_u)["pred"]
+            pred_u_teacher = F.interpolate(
+                pred_u_teacher, (h, w), mode="bilinear", align_corners=True
+            )
+            pred_u_teacher = F.softmax(pred_u_teacher, dim=1)
+            logits_u_aug, label_u_aug = torch.max(pred_u_teacher, dim=1)
+
+            # 应用强数据增强：cutout, cutmix, 或 classmix
+            if np.random.uniform(0, 1) < 0.5 and cfg["trainer"]["unsupervised"].get(
+                "apply_aug", False
+            ):
+                image_u_aug, label_u_aug, logits_u_aug = generate_unsup_data(
+                    image_u,
+                    label_u_aug.clone(),
+                    logits_u_aug.clone(),
+                    mode=cfg["trainer"]["unsupervised"]["apply_aug"],
+                )
+            else:
+                image_u_aug = image_u
+
+            # 前向传播
+            num_labeled = len(image_l)
+            image_all = torch.cat((image_l, image_u_aug))
+            outs_ta = model_ta(image_all)
+            
+            pred_a_all, rep_a_all = outs_ta["pred"], outs_ta["rep"]
+            pred_a_l, pred_a_u = pred_a_all[:num_labeled], pred_a_all[num_labeled:]
+            if "aux_loss" in cfg["net"].keys():
+                aux_ta = outs_ta["aux"]
+
+            pred_a_l_large = F.interpolate(
+                pred_a_l, size=(h, w), mode="bilinear", align_corners=True
+            )
+            pred_a_u_large = F.interpolate(
+                pred_a_u, size=(h, w), mode="bilinear", align_corners=True
+            )
+
+            # 教师模型前向传播
+            model_teacher.train()
+            with torch.no_grad():
+                out_t = model_teacher(image_all)
+                pred_all_teacher, rep_all_teacher = out_t["pred"], out_t["rep"]
+                prob_all_teacher = F.softmax(pred_all_teacher, dim=1)
+                prob_l_teacher, prob_u_teacher = (
+                    prob_all_teacher[:num_labeled],
+                    prob_all_teacher[num_labeled:],
+                )
+
+                pred_u_teacher = pred_all_teacher[num_labeled:]
+                pred_u_large_teacher = F.interpolate(
+                    pred_u_teacher, size=(h, w), mode="bilinear", align_corners=True
+                )
+
+            # 无监督损失
+            with torch.amp.autocast('cuda'):
+                unsup_loss = (
+                    compute_unsupervised_loss_conf_weight(
+                        pred_a_u_large,
+                        label_u_aug.clone(),
+                        cfg["trainer"]["unsupervised"].get("drop_percent", 100),
+                        pred_u_large_teacher.detach(),
+                    )
+                    * cfg["trainer"]["unsupervised"].get("loss_weight", 1)
+                ) + 0.0 * rep_a_all.sum()
+
+            optimizer_ta.zero_grad()
+            scaler.scale(unsup_loss).backward()
+            scaler.step(optimizer_ta)
+            scaler.update()
+
+            model.eval()
+            with torch.no_grad():
+                ema_decay = min(
+                    1
+                    - 1
+                    / (
+                        i_iter
+                        - len(loader_l) * cfg["trainer"].get("sup_only_epoch", 1)
+                        + 1
+                    ),
+                    0.999,
+                )
+                for t_params, s_params in zip(
+                    model.named_parameters(), model_ta.named_parameters()
+                ):
+                    if 'module.decoder.classifier' not in t_params[0]:
+                        t_params[1].data = (
+                            ema_decay * t_params[1].data + (1 - ema_decay) * s_params[1].data
+                        )
+
+            model.train()
+
+            outs = model(image_all)
+            pred_all, rep_all = outs["pred"], outs["rep"]
+            pred_l, pred_u = pred_all[:num_labeled], pred_all[num_labeled:]
+
+            pred_l_large = F.interpolate(
+                pred_l, size=(h, w), mode="bilinear", align_corners=True
+            )
+            pred_u_large = F.interpolate(
+                pred_u, size=(h, w), mode="bilinear", align_corners=True
+            )
+
+            if "aux_loss" in cfg["net"].keys():
+                aux = outs["aux"][:num_labeled]
+                aux = F.interpolate(aux, (h, w), mode="bilinear", align_corners=True)
+                with torch.amp.autocast('cuda'):
+                    sup_loss = sup_loss_fn([pred_l_large, aux], label_l.clone()) + 0 * rep_all.sum()
+            else:
+                with torch.amp.autocast('cuda'):
+                    sup_loss = sup_loss_fn(pred_l_large, label_l.clone()) + 0 * rep_all.sum()
+
+        # 反向传播并更新参数
+        optimizer.zero_grad()
+        scaler.scale(sup_loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+
+        # 使用EMA更新教师模型
+        if epoch >= cfg["trainer"].get("sup_only_epoch", 1):
+            with torch.no_grad():
+                ema_decay = min(
+                    1
+                    - 1
+                    / (
+                        i_iter
+                        - len(loader_l) * cfg["trainer"].get("sup_only_epoch", 1)
+                        + 1
+                    ),
+                    ema_decay_origin,
+                )
+                for t_params, s_params in zip(
+                    model_teacher.parameters(), model.parameters()
+                ):
+                    t_params.data = (
+                        ema_decay * t_params.data + (1 - ema_decay) * s_params.data
+                    )
+
+        # 收集不同GPU上的所有损失
+        reduced_sup_loss = sup_loss.clone().detach()
+        dist.all_reduce(reduced_sup_loss)
+        sup_losses.update(reduced_sup_loss.item())
+
+        reduced_uns_loss = unsup_loss.clone().detach()
+        dist.all_reduce(reduced_uns_loss)
+        uns_losses.update(reduced_uns_loss.item())
+
+        reduced_con_loss = 0.0
+        con_losses.update(0.0)
+
+        batch_end = time.time()
+        batch_times.update(batch_end - batch_start)
+
+        if i_iter % 10 == 0 and rank == 0:
+            logger.info(
+                "[{}] "
+                "Iter [{}/{}]\t"
+                "Data {data_time.val:.2f} ({data_time.avg:.2f})\t"
+                "Time {batch_time.val:.2f} ({batch_time.avg:.2f})\t"
+                "Sup {sup_loss.val:.3f} ({sup_loss.avg:.3f})\t"
+                "Uns {uns_loss.val:.3f} ({uns_loss.avg:.3f})\t"
+                "Con {con_loss.val:.3f} ({con_loss.avg:.3f})\t"
+                "LR {lr.val:.5f}".format(
+                    cfg["dataset"]["n_sup"],
+                    i_iter,
+                    cfg["trainer"]["epochs"] * len(loader_l),
+                    data_time=data_times,
+                    batch_time=batch_times,
+                    sup_loss=sup_losses,
+                    uns_loss=uns_losses,
+                    con_loss=con_losses,
+                    lr=learning_rates,
+                )
+            )
+
+            tb_logger.add_scalar("lr", learning_rates.val, i_iter)
+            tb_logger.add_scalar("Sup Loss", sup_losses.val, i_iter)
+            tb_logger.add_scalar("Uns Loss", uns_losses.val, i_iter)
+            tb_logger.add_scalar("Con Loss", con_losses.val, i_iter)
+
+            # 将预测的图片写入TensorBoard (添加保护性检查)
+            if tb_logger is not None:
+                grid_image = make_grid(image_l[:4], nrow=2, normalize=True)
+                tb_logger.add_image('Train Images', grid_image, i_iter)
+                
+                if 'pred_l_large' in locals():
+                    grid_pred = make_grid(
+                        F.interpolate(pred_l_large[:4], scale_factor=4).max(1)[1].unsqueeze(1).float() / cfg["net"]["num_classes"], 
+                        nrow=2, normalize=True
+                    )
+                    tb_logger.add_image('Train Predictions', grid_pred, i_iter)
+
 
 def validate(
     model,
