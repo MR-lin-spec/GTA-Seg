@@ -1,4 +1,4 @@
-import collections
+import collections.abc
 import math
 import numbers
 import random
@@ -10,7 +10,6 @@ from PIL import Image
 from scipy.ndimage import gaussian_filter
 from torch import nn
 from torch.nn import functional as F
-
 
 class Compose(object):
     """
@@ -45,7 +44,6 @@ class Compose(object):
             return img_origin, label_origin, img, label, valid
         else:
             return img, label, masks
-
 
 class ToTensor(object):
     # Converts a PIL Image or numpy.ndarray (H x W x C) to a torch.FloatTensor of shape (1 x C x H x W).
@@ -85,7 +83,6 @@ class ToTensor(object):
             label = label.float()
         return image, label
 
-
 class Normalize(object):
     """
     Given mean and std of each channel
@@ -110,7 +107,6 @@ class Normalize(object):
             image /= self.std
         return image, label
 
-
 class Resize(object):
     """
     Resize the input tensor to the given size.
@@ -118,7 +114,7 @@ class Resize(object):
     """
 
     def __init__(self, size):
-        assert isinstance(size, collections.Iterable) and len(size) == 2
+        assert isinstance(size, collections.abc.Iterable) and len(size) == 2
         self.size = size
 
     def __call__(self, image, label):
@@ -127,7 +123,6 @@ class Resize(object):
         )
         label = F.interpolate(label, size=self.size, mode="nearest")
         return image, label
-
 
 class ResizeLongSize(object):
     """
@@ -155,16 +150,15 @@ class ResizeLongSize(object):
 
         return image, label
 
-
 class RandResize(object):
     """
     Randomly resize image & label with scale factor in [scale_min, scale_max]
     """
 
     def __init__(self, scale, aspect_ratio=None):
-        assert isinstance(scale, collections.Iterable) and len(scale) == 2
+        assert isinstance(scale, collections.abc.Iterable) and len(scale) == 2
         if (
-            isinstance(scale, collections.Iterable)
+            isinstance(scale, collections.abc.Iterable)
             and len(scale) == 2
             and isinstance(scale[0], numbers.Number)
             and isinstance(scale[1], numbers.Number)
@@ -175,7 +169,7 @@ class RandResize(object):
         if aspect_ratio is None:
             self.aspect_ratio = aspect_ratio
         elif (
-            isinstance(aspect_ratio, collections.Iterable)
+            isinstance(aspect_ratio, collections.abc.Iterable)
             and len(aspect_ratio) == 2
             and isinstance(aspect_ratio[0], numbers.Number)
             and isinstance(aspect_ratio[1], numbers.Number)
@@ -210,7 +204,6 @@ class RandResize(object):
         label = F.interpolate(label, size=(new_h, new_w), mode="nearest")
         return image, label
 
-
 class Crop(object):
     """Crops the given tensor.
     Args:
@@ -223,7 +216,7 @@ class Crop(object):
             self.crop_h = size
             self.crop_w = size
         elif (
-            isinstance(size, collections.Iterable)
+            isinstance(size, collections.abc.Iterable)
             and len(size) == 2
             and isinstance(size[0], int)
             and isinstance(size[1], int)
@@ -265,14 +258,13 @@ class Crop(object):
         label = label[:, :, h_off : h_off + self.crop_h, w_off : w_off + self.crop_w]
         return image, label
 
-
 class RandRotate(object):
     """
     Randomly rotate image & label with rotate factor in [rotate_min, rotate_max]
     """
 
     def __init__(self, rotate, ignore_label=255):
-        assert isinstance(rotate, collections.Iterable) and len(rotate) == 2
+        assert isinstance(rotate, collections.abc.Iterable) and len(rotate) == 2
         if isinstance(rotate[0], numbers.Number) and isinstance(
             rotate[1], numbers.Number
         ):
@@ -295,7 +287,6 @@ class RandRotate(object):
         label -= 1
         return image, label
 
-
 class RandomHorizontalFlip(object):
     def __call__(self, image, label):
         if random.random() < 0.5:
@@ -303,14 +294,12 @@ class RandomHorizontalFlip(object):
             label = torch.flip(label, [3])
         return image, label
 
-
 class RandomVerticalFlip(object):
     def __call__(self, image, label):
         if random.random() < 0.5:
             image = torch.flip(image, [2])
             label = torch.flip(label, [2])
         return image, label
-
 
 class RandomGaussianBlur(object):
     def __init__(self, radius=2):
@@ -320,7 +309,6 @@ class RandomGaussianBlur(object):
         if random.random() < 0.5:
             image = self._filter(image)
         return image, label
-
 
 class GaussianBlur(nn.Module):
     def __init__(self, radius):
@@ -344,7 +332,6 @@ class GaussianBlur(nn.Module):
         for param in self.kernel.parameters():
             param.data.copy_(torch.from_numpy(weight))
             param.requires_grad = False
-
 
 class Cutout(object):
     """Randomly mask out one or more patches from an image.
@@ -393,7 +380,6 @@ class Cutout(object):
         # label = label + mask
         # label[label>20] = 255
         return img_origin, label_origin, img, label, valid
-
 
 class Cutmix(object):
     """Randomly mask out one or more patches from an image.
@@ -467,7 +453,6 @@ class Cutmix(object):
 
         return img, label, masks
 
-
 def generate_cutout_mask(img_size, ratio=2):
     cutout_area = img_size[0] * img_size[1] / ratio
 
@@ -484,7 +469,6 @@ def generate_cutout_mask(img_size, ratio=2):
     mask[y_start:y_end, x_start:x_end] = 0
     return mask.long()
 
-
 def generate_class_mask(pseudo_labels):
     labels = torch.unique(pseudo_labels)  # all unique labels
     labels_select = labels[torch.randperm(len(labels))][
@@ -493,7 +477,6 @@ def generate_class_mask(pseudo_labels):
 
     mask = (pseudo_labels.unsqueeze(-1) == labels_select).any(-1)
     return mask.float()
-
 
 def generate_unsup_data(data, target, logits, mode="cutout"):
     batch_size, _, im_h, im_w = data.shape

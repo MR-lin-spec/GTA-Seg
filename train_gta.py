@@ -37,12 +37,11 @@ from gta.utils.utils import (
     set_random_seed,
 )
 
-parser = argparse.ArgumentParser(description="Semi-Supervised Semantic Segmentation")
-parser.add_argument("--config", type=str, default="config.yaml")
-parser.add_argument("--local_rank", type=int, default=0)
-parser.add_argument("--seed", type=int, default=0)
-parser.add_argument("--port", default=None, type=int)
-
+parser = argparse.ArgumentParser(description="半监督语义分割")
+parser.add_argument("--config", type=str, default="config.yaml", help="配置文件路径")
+parser.add_argument("--local_rank", type=int, default=0, help="本地进程排名")
+parser.add_argument("--seed", type=int, default=0, help="随机种子")
+parser.add_argument("--port", default=None, type=int, help="端口号")
 
 def main():
     global args, cfg, prototype
@@ -53,9 +52,11 @@ def main():
     logger = init_log("global", logging.INFO)
     logger.propagate = 0
 
+    # 设置实验路径和保存路径
     cfg["exp_path"] = os.path.dirname(args.config)
     cfg["save_path"] = os.path.join(cfg["exp_path"], cfg["saver"]["snapshot_dir"])
 
+    # CUDA设置
     cudnn.enabled = True
     cudnn.benchmark = True
 
@@ -67,6 +68,11 @@ def main():
         tb_logger = SummaryWriter(
             osp.join(cfg["exp_path"], "log/events_seg/" + current_time)
         )
+        log_file = osp.join(cfg["exp_path"], "log/", f"{current_time}.log")
+        file_handler = logging.FileHandler(log_file)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
     else:
         tb_logger = None
 
@@ -77,7 +83,7 @@ def main():
     if not osp.exists(cfg["saver"]["snapshot_dir"]) and rank == 0:
         os.makedirs(cfg["saver"]["snapshot_dir"])
 
-    # Create network
+    # 创建网络模型
     model = ModelBuilder(cfg["net"])
     modules_back = [model.encoder]
     if cfg["net"].get("aux_loss", False):
@@ -94,7 +100,7 @@ def main():
 
     train_loader_sup, train_loader_unsup, val_loader = get_loader(cfg, seed=seed)
 
-    # Optimizer and lr decay scheduler
+    # 优化器和学习率调度器
     cfg_trainer = cfg["trainer"]
     cfg_optim = cfg_trainer["optimizer"]
     times = 10 if "pascal" in cfg["dataset"]["type"] else 1
@@ -117,10 +123,9 @@ def main():
         device_ids=[local_rank],
         output_device=local_rank,
         find_unused_parameters=False,
-        # find_unused_parameters=True,
     )
 
-    ## Teacher Assistant model
+    ## Teacher Assistant 模型
     model_ta = ModelBuilder(cfg["net"])
     modules_ta_back = [model_ta.encoder]
     if cfg["net"].get("aux_loss", False):
@@ -151,10 +156,9 @@ def main():
         device_ids=[local_rank],
         output_device=local_rank,
         find_unused_parameters=False,
-        # find_unused_parameters=True,
     )
 
-    # Teacher model
+    # 教师模型
     model_teacher = ModelBuilder(cfg["net"])
     model_teacher = model_teacher.cuda()
     model_teacher = torch.nn.parallel.DistributedDataParallel(
@@ -162,7 +166,6 @@ def main():
         device_ids=[local_rank],
         output_device=local_rank,
         find_unused_parameters=False,
-        # find_unused_parameters=True,
     )
 
     for p in model_teacher.parameters():
@@ -171,11 +174,11 @@ def main():
     best_prec = 0
     last_epoch = 0
 
-    # auto_resume > pretrain
+    # 自动恢复 > 预训练
     if cfg["saver"].get("auto_resume", False):
         lastest_model = os.path.join(cfg["save_path"], "ckpt.pth")
         if not os.path.exists(lastest_model):
-            "No checkpoint found in '{}'".format(lastest_model)
+            logger.error("No checkpoint found in '{}'".format(lastest_model))
         else:
             print(f"Resume model from: '{lastest_model}'")
             best_prec, last_epoch = load_state(
@@ -193,9 +196,9 @@ def main():
         cfg_trainer, len(train_loader_sup), optimizer, start_epoch=last_epoch
     )
 
-    # Start to train model
+    # 开始训练模型
     for epoch in range(last_epoch, cfg_trainer["epochs"]):
-        # Training
+        # 训练
         train(
             model,
             model_teacher,
@@ -211,10 +214,10 @@ def main():
             logger,
         )
 
-        # Validation
+        # 验证
         if cfg_trainer["eval_on"]:
             if rank == 0:
-                logger.info("start evaluation")
+                logger.info("开始验证")
 
             if epoch < cfg["trainer"].get("sup_only_epoch", 1):
                 prec = validate(model, val_loader, epoch, logger)
@@ -238,12 +241,9 @@ def main():
                 torch.save(state, osp.join(cfg["saver"]["snapshot_dir"], "ckpt.pth"))
 
                 logger.info(
-                    "\033[31m * Currently, the best val result is: {:.2f}\033[0m".format(
-                        best_prec * 100
-                    )
+                    "\033[31m * 目前最佳验证结果是: {:.2f}\033[0m".format(best_prec * 100)
                 )
                 tb_logger.add_scalar("mIoU val", prec, epoch)
-
 
 def train(
     model,
@@ -270,7 +270,7 @@ def train(
     loader_u_iter = iter(loader_u)
     assert len(loader_l) == len(
         loader_u
-    ), f"labeled data {len(loader_l)} unlabeled data {len(loader_u)}, imbalance!"
+    ), f"标注数据 {len(loader_l)} 未标注数据 {len(loader_u)}, 数据不平衡!"
 
     rank, world_size = dist.get_rank(), dist.get_world_size()
 
@@ -291,21 +291,21 @@ def train(
         learning_rates.update(lr[0])
         lr_scheduler.step()
 
-        image_l, label_l = loader_l_iter.next()
+        image_l, label_l = next(loader_l_iter)
         batch_size, h, w = label_l.size()
         image_l, label_l = image_l.cuda(), label_l.cuda()
 
-        image_u, _ = loader_u_iter.next()
+        image_u, _ = next(loader_u_iter)
         image_u = image_u.cuda()
 
         if epoch < cfg["trainer"].get("sup_only_epoch", 1):
             contra_flag = "none"
-            # forward
+            # 前向传播
             outs = model(image_l)
             pred, rep = outs["pred"], outs["rep"]
             pred = F.interpolate(pred, (h, w), mode="bilinear", align_corners=True)
 
-            # supervised loss
+            # 监督损失
             if "aux_loss" in cfg["net"].keys():
                 aux = outs["aux"]
                 aux = F.interpolate(aux, (h, w), mode="bilinear", align_corners=True)
@@ -322,7 +322,7 @@ def train(
             contra_loss = 0 * rep.sum()
         else:
             if epoch == cfg["trainer"].get("sup_only_epoch", 1):
-                # copy student parameters to teacher
+                # 将学生参数复制到教师模型
                 with torch.no_grad():
                     for t_params, s_params in zip(
                         model_teacher.parameters(), model.parameters()
@@ -334,7 +334,7 @@ def train(
                     ):
                         t_params.data = s_params.data
 
-            # generate pseudo labels first
+            # 生成伪标签
             model_teacher.eval()
             pred_u_teacher = model_teacher(image_u)["pred"]
             pred_u_teacher = F.interpolate(
@@ -343,7 +343,7 @@ def train(
             pred_u_teacher = F.softmax(pred_u_teacher, dim=1)
             logits_u_aug, label_u_aug = torch.max(pred_u_teacher, dim=1)
 
-            # apply strong data augmentation: cutout, cutmix, or classmix
+            # 应用强数据增强：cutout, cutmix, 或 classmix
             if np.random.uniform(0, 1) < 0.5 and cfg["trainer"]["unsupervised"].get(
                 "apply_aug", False
             ):
@@ -356,7 +356,7 @@ def train(
             else:
                 image_u_aug = image_u
 
-            # forward
+            # 前向传播
             num_labeled = len(image_l)
             image_all = torch.cat((image_l, image_u_aug))
             outs_ta = model_ta(image_all)
@@ -373,7 +373,7 @@ def train(
                 pred_a_u, size=(h, w), mode="bilinear", align_corners=True
             )
 
-            # teacher forward
+            # 教师模型前向传播
             model_teacher.train()
             with torch.no_grad():
                 out_t = model_teacher(image_all)
@@ -389,7 +389,7 @@ def train(
                     pred_u_teacher, size=(h, w), mode="bilinear", align_corners=True
                 )
 
-            # unsupervised loss
+            # 无监督损失
             unsup_loss = (
                 compute_unsupervised_loss_conf_weight(
                     pred_a_u_large,
@@ -399,7 +399,6 @@ def train(
                 )
                 * cfg["trainer"]["unsupervised"].get("loss_weight", 1)
             ) + 0.0 * rep_a_all.sum()
-
 
             optimizer_ta.zero_grad()
             unsup_loss.backward()
@@ -445,13 +444,12 @@ def train(
             else:
                 sup_loss = sup_loss_fn(pred_l_large, label_l.clone()) + 0 * rep_all.sum()
 
-        # loss = sup_loss + unsup_loss + 0.0 * contra_loss
-
+        # 反向传播并更新参数
         optimizer.zero_grad()
         sup_loss.backward()
         optimizer.step()
 
-        # update teacher model with EMA
+        # 使用EMA更新教师模型
         if epoch >= cfg["trainer"].get("sup_only_epoch", 1):
             with torch.no_grad():
                 ema_decay = min(
@@ -471,7 +469,7 @@ def train(
                         ema_decay * t_params.data + (1 - ema_decay) * s_params.data
                     )
 
-        # gather all loss from different gpus
+        # 收集不同GPU上的所有损失
         reduced_sup_loss = sup_loss.clone().detach()
         dist.all_reduce(reduced_sup_loss)
         sup_losses.update(reduced_sup_loss.item())
@@ -513,6 +511,11 @@ def train(
             tb_logger.add_scalar("Uns Loss", uns_losses.val, i_iter)
             tb_logger.add_scalar("Con Loss", con_losses.val, i_iter)
 
+            # 将预测的图片写入TensorBoard
+            grid_image = make_grid(image_l[:4], nrow=2, normalize=True)
+            tb_logger.add_image('Train Images', grid_image, i_iter)
+            grid_pred = make_grid(F.interpolate(pred_l_large[:4], scale_factor=4).max(1)[1].unsqueeze(1).float() / cfg["net"]["num_classes"], nrow=2, normalize=True)
+            tb_logger.add_image('Train Predictions', grid_pred, i_iter)
 
 def validate(
     model,
@@ -540,7 +543,7 @@ def validate(
         with torch.no_grad():
             outs = model(images)
 
-        # get the output produced by model_teacher
+        # 获取模型教师的输出
         output = outs["pred"]
         output = F.interpolate(
             output, labels.shape[1:], mode="bilinear", align_corners=True
@@ -548,12 +551,12 @@ def validate(
         output = output.data.max(1)[1].cpu().numpy()
         target_origin = labels.cpu().numpy()
 
-        # start to calculate miou
+        # 计算miou
         intersection, union, target = intersectionAndUnion(
             output, target_origin, num_classes, ignore_label
         )
 
-        # gather all validation information
+        # 收集所有验证信息
         reduced_intersection = torch.from_numpy(intersection).cuda()
         reduced_union = torch.from_numpy(union).cuda()
         reduced_target = torch.from_numpy(target).cuda()
@@ -570,11 +573,12 @@ def validate(
 
     if rank == 0:
         for i, iou in enumerate(iou_class):
-            logger.info(" * class [{}] IoU {:.2f}".format(i, iou * 100))
-        logger.info(" * epoch {} mIoU {:.2f}".format(epoch, mIoU * 100))
+            logger.info(" * 类别 [{}] IoU {:.2f}".format(i, iou * 100))
+        logger.info(" * 第 {} 轮次 mIoU {:.2f}".format(epoch, mIoU * 100))
 
     return mIoU
 
-
 if __name__ == "__main__":
     main()
+
+

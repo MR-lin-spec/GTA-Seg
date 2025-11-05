@@ -12,7 +12,7 @@ from torchvision import transforms
 
 from . import augmentation as psp_trsform
 from .base import BaseDataset
-
+from PIL import Image
 
 class voc_dset(BaseDataset):
     def __init__(
@@ -27,7 +27,6 @@ class voc_dset(BaseDataset):
         elif len(self.list_sample) < n_sup and split == "train":
             num_repeat = math.ceil(n_sup / len(self.list_sample))
             self.list_sample = self.list_sample * num_repeat
-
             self.list_sample_new = random.sample(self.list_sample, n_sup)
         else:
             self.list_sample_new = self.list_sample
@@ -36,14 +35,37 @@ class voc_dset(BaseDataset):
         # load image and its label
         image_path = os.path.join(self.data_root, self.list_sample_new[index][0])
         label_path = os.path.join(self.data_root, self.list_sample_new[index][1])
+        label_path = label_path.replace("SegmentationClassAug", "SegmentationClass")
+        
+        # 图像读取保持不变（RGB模式）
         image = self.img_loader(image_path, "RGB")
-        label = self.img_loader(label_path, "L")
+        
+        # 关键修改：正确读取VOC2012标签（通过调色板获取真实类别值）
+        with open(label_path, "rb") as f:
+            label = Image.open(f)
+            # 1. 若标签是伪彩色图，先转成单通道类别图（利用调色板映射）
+            label = label.convert("P")  # "P"模式是调色板模式，对应语义分割标签
+            # 2. 转换为numpy数组，获取真实类别值（此时才是0~20或255）
+            label_np = np.array(label, dtype=np.uint8)
+        
+        # 标签合法性校验（过滤异常值，兜底）
+        valid_labels = (label_np >= 0) & (label_np <= 20) | (label_np == 255)
+        if not valid_labels.all():
+            invalid_values = np.unique(label_np[~valid_labels])
+            print(f"Warning: 标签文件 {label_path} 包含非法标签值：{invalid_values}，已自动设为ignore_label=255")
+            label_np[~valid_labels] = 255  # 非法值设为忽略标签
+        
+        # 转回PIL.Image，用于后续数据增强
+        label = Image.fromarray(label_np)
+        
+        # 数据增强（确保标签用最近邻插值）
         image, label = self.transform(image, label)
+        
+        # 最终返回时转成long类型
         return image[0], label[0, 0].long()
 
     def __len__(self):
         return len(self.list_sample_new)
-
 
 def build_transfrom(cfg):
     trs_form = []
@@ -70,19 +92,18 @@ def build_transfrom(cfg):
         )
     return psp_trsform.Compose(trs_form)
 
-
 def build_vocloader(split, all_cfg, seed=0):
     cfg_dset = all_cfg["dataset"]
-
     cfg = copy.deepcopy(cfg_dset)
     cfg.update(cfg.get(split, {}))
 
     workers = cfg.get("workers", 2)
     batch_size = cfg.get("batch_size", 1)
     n_sup = cfg.get("n_sup", 10582)
+
     # build transform
     trs_form = build_transfrom(cfg)
-    dset = voc_dset(cfg["data_root"], cfg["data_list"], trs_form, seed, n_sup)
+    dset = voc_dset(cfg["data_root"], cfg["data_list"], trs_form, seed, n_sup, split)
 
     # build sampler
     sample = DistributedSampler(dset)
@@ -97,10 +118,8 @@ def build_vocloader(split, all_cfg, seed=0):
     )
     return loader
 
-
 def build_voc_semi_loader(split, all_cfg, seed=0):
     cfg_dset = all_cfg["dataset"]
-
     cfg = copy.deepcopy(cfg_dset)
     cfg.update(cfg.get(split, {}))
 

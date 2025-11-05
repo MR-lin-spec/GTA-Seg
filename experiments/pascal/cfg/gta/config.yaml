@@ -1,25 +1,25 @@
 dataset: # Required.
   type: pascal_semi
   train:
-    data_root: ../../../../data/VOC2012
-    data_list: ../../../../data/splits/pascal/183/labeled.txt
+    data_root: /DeepLearning_linux/Projects/GTA-Seg/data/splits/VOC2012
+    data_list: /DeepLearning_linux/Projects/GTA-Seg/data/splits/splits_pascal/original_0.5/labled.txt
     flip: True
     GaussianBlur: False
     rand_resize: [0.5, 2.0]
     #rand_rotation: [-10.0, 10.0]
     crop:
       type: rand
-      size: [513, 513] # crop image with HxW size
+      size: [224, 224] # crop image with HxW size
   val:
-    data_root: ../../../../data/VOC2012
-    data_list: ../../../../data/splits/pascal/val.txt
+    data_root: /DeepLearning_linux/Projects/GTA-Seg/data/splits/VOC2012
+    data_list: /DeepLearning_linux/Projects/GTA-Seg/data/splits/splits_pascal/val.txt
     crop:
       type: center
-      size: [513, 513] # crop image with HxW size
-  batch_size: 3
+      size: [224, 224] # crop image with HxW size
+  batch_size: 8
   n_sup: 183
   noise_std: 0.1
-  workers: 2
+  workers: 4
   mean: [123.675, 116.28, 103.53]
   std: [58.395, 57.12, 57.375]
   ignore_label: 255
@@ -30,7 +30,7 @@ trainer: # Required.
   optimizer:
     type: SGD
     kwargs:
-      lr: 0.001  # 4GPUs
+      lr: 0.0001  # 4GPUs
       momentum: 0.9
       weight_decay: 0.0001
   lr_scheduler:
