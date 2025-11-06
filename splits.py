@@ -38,10 +38,10 @@ def split_and_write_basenames(valid_list, ratios, out_base: Path, tag: str):
         if ratio==1.0:
             labeled = train_list
             unlabeled = train_list
-        n_label = max(1, int(len(train_list) * ratio)) if ratio <= 1.0 else len(train_list)
-        labeled   = train_list[:n_label]
-        unlabeled = train_list[n_label:]
-
+        else:
+            n_label = max(1, int(len(train_list) * ratio)) if ratio <= 1.0 else len(train_list)
+            labeled   = train_list[:n_label]
+            unlabeled = train_list[n_label:]
         ratio_str = f"{ratio}".replace("/", "_")
         split_dir = out_base / f"{tag}_{ratio_str}"
         split_dir.mkdir(parents=True, exist_ok=True)
