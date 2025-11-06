@@ -35,6 +35,9 @@ def split_and_write_basenames(valid_list, ratios, out_base: Path, tag: str):
 
     # 对 train_list 再做比例划分
     for ratio in ratios:
+        if ratio==1.0:
+            labeled = train_list
+            unlabeled = train_list
         n_label = max(1, int(len(train_list) * ratio)) if ratio <= 1.0 else len(train_list)
         labeled   = train_list[:n_label]
         unlabeled = train_list[n_label:]

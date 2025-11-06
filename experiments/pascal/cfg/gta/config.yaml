@@ -2,7 +2,7 @@ dataset: # Required.
   type: pascal_semi
   train:
     data_root: /DeepLearning_linux/Projects/GTA-Seg/data/splits/VOC2012
-    data_list: /DeepLearning_linux/Projects/GTA-Seg/data/splits/splits_pascal/original_0.5/labeled.txt
+    data_list: /DeepLearning_linux/Projects/GTA-Seg/data/splits/splits_pascal/original_1/labeled.txt
     flip: True
     GaussianBlur: False
     rand_resize: [0.5, 2.0]
@@ -25,7 +25,7 @@ dataset: # Required.
   ignore_label: 255
 
 trainer: # Required.
-  epochs: 10
+  epochs: 80
   eval_on: True
   optimizer:
     type: SGD

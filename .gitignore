@@ -8,3 +8,7 @@
 *.pth 
 *.log
 *.pyc
+
+#忽略所有日志文件
+
+/experiments/pascal/cfg/gta/log/events_seg/*
