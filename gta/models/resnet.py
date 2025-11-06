@@ -17,7 +17,7 @@ model_urls = {
     "resnet18": "~/GTA-Seg/resnet18.pth",
     "resnet34": "~/GTA-Seg/resnet34.pth",
     "resnet50": "~/GTA-Seg/resnet50.pth",
-    "resnet101": "/DeepLearning_linux/Projects/GTA-Seg/resnet101.pth",
+    "resnet101": "/root/GTA-Seg/resnet101.pth",
     "resnet152": "~/GTA-Seg/resnet152.pth",
 }
 

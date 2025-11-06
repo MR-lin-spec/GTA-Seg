@@ -53,8 +53,8 @@ def split_and_write_basenames(valid_list, ratios, out_base: Path, tag: str):
 # -------------------------------------------------
 if __name__ == "__main__":
  # --------------- 用户路径（保持不动） ---------------
-    VOC2012_ROOT    = Path("/DeepLearning_linux/Projects/GTA-Seg/data/splits/VOC2012/")
-    BASE_OUTPUT_DIR = Path(r"\\DeepLearning_linux\Projects\GTA-Seg\data\splits_pascal")
+    VOC2012_ROOT    = Path("/root/autodl-tmp/VOC2012")
+    BASE_OUTPUT_DIR = Path("/root/GTA-Seg/data/splits_pascal")
     # ----------------------------------------------------
 
     BASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
