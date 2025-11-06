@@ -15,8 +15,8 @@ dataset: # Required.
     data_list: /root/GTA-Seg/data/splits_pascal/val.txt
     crop:
       type: center
-      size: [224, 224] # crop image with HxW size
-  batch_size: 16
+      size: [512, 512] # crop image with HxW size
+  batch_size: 4
   n_sup: 183
   noise_std: 0.1
   workers: 8
