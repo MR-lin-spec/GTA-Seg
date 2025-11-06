@@ -1,25 +1,25 @@
 dataset: # Required.
   type: pascal_semi
   train:
-    data_root: /DeepLearning_linux/Projects/GTA-Seg/data/splits/VOC2012
-    data_list: /DeepLearning_linux/Projects/GTA-Seg/data/splits/splits_pascal/original_0.5/labeled.txt
+    data_root: /root/autodl-tmp/VOC2012
+    data_list: /root/GTA-Seg/data/splits_pascal/original_0.5/labeled.txt
     flip: True
     GaussianBlur: False
     rand_resize: [0.5, 2.0]
     #rand_rotation: [-10.0, 10.0]
     crop:
       type: rand
-      size: [224, 224] # crop image with HxW size
+      size: [512, 512] # crop image with HxW size
   val:
-    data_root: /DeepLearning_linux/Projects/GTA-Seg/data/splits/VOC2012
-    data_list: /DeepLearning_linux/Projects/GTA-Seg/data/splits/splits_pascal/val.txt
+    data_root: /root/autodl-tmp/VOC2012
+    data_list: /root/GTA-Seg/data/splits_pascal/val.txt
     crop:
       type: center
       size: [224, 224] # crop image with HxW size
-  batch_size: 4
+  batch_size: 16
   n_sup: 183
   noise_std: 0.1
-  workers: 4
+  workers: 8
   mean: [123.675, 116.28, 103.53]
   std: [58.395, 57.12, 57.375]
   ignore_label: 255
