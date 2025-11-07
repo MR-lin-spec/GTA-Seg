@@ -16,7 +16,7 @@ dataset: # Required.
     crop:
       type: center
       size: [512, 512] # crop image with HxW size
-  batch_size: 4
+  batch_size: 24
   n_sup: 183
   noise_std: 0.1
   workers: 8
