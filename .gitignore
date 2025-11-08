@@ -3,6 +3,7 @@
 /data/splits/*.tar.gz*
 /data/splits/VOC2012/*
 /data/splits/*
+/experiments/pascal/cfg/gta/log/*
 
 #忽略pth模型文件，注意，注释和使用分别一行
 *.pth 

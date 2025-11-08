@@ -2,30 +2,30 @@ dataset: # Required.
   type: pascal_semi
   train:
     data_root: /root/autodl-tmp/VOC2012
-    data_list: /root/GTA-Seg/data/splits_pascal/original_0.5/labeled.txt
+    data_list: /root/GTA-Seg/data/splits_pascal/original_0.25/labeled.txt
     flip: True
     GaussianBlur: False
     rand_resize: [0.5, 2.0]
     #rand_rotation: [-10.0, 10.0]
     crop:
       type: rand
-      size: [512, 512] # crop image with HxW size
+      size: [224, 224] # crop image with HxW size
   val:
     data_root: /root/autodl-tmp/VOC2012
     data_list: /root/GTA-Seg/data/splits_pascal/val.txt
     crop:
       type: center
-      size: [512, 512] # crop image with HxW size
-  batch_size: 24
+      size: [224, 224] # crop image with HxW size
+  batch_size: 16
   n_sup: 183
   noise_std: 0.1
-  workers: 8
+  workers: 10
   mean: [123.675, 116.28, 103.53]
   std: [58.395, 57.12, 57.375]
   ignore_label: 255
 
 trainer: # Required.
-  epochs: 10
+  epochs: 80
   eval_on: True
   optimizer:
     type: SGD
