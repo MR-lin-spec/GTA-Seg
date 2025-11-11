@@ -2,7 +2,7 @@ dataset: # Required.
   type: pascal_semi
   train:
     data_root: /root/autodl-tmp/VOC2012
-    data_list: /root/GTA-Seg/data/splits_pascal/original_0.5/labeled.txt
+    data_list: /root/GTA-Seg/data/splits_pascal/original_0.0625/labeled.txt
     flip: True
     GaussianBlur: False
     rand_resize: [0.5, 2.0]
@@ -12,7 +12,7 @@ dataset: # Required.
       size: [224, 224] # crop image with HxW size
   val:
     data_root: /root/autodl-tmp/VOC2012
-    data_list: /root/GTA-Seg/data/splits_pascal/val.txt
+    data_list: /root/GTA-Seg/data/splits_pascal/val_two.txt
     crop:
       type: center
       size: [224, 224] # crop image with HxW size
