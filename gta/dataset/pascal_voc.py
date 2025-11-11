@@ -31,11 +31,23 @@ class voc_dset(BaseDataset):
         else:
             self.list_sample_new = self.list_sample
 
+
     def __getitem__(self, index):
         # load image and its label
         image_path = os.path.join(self.data_root, self.list_sample_new[index][0])
         label_path = os.path.join(self.data_root, self.list_sample_new[index][1])
-        label_path = label_path.replace("SegmentationClassAug", "SegmentationClass")
+        
+        # 验证图像路径是否存在
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"图像文件不存在: {image_path}")
+        
+        # 更安全的路径替换方式：只在确实需要替换时才替换一次
+        if "SegmentationClass" in label_path and "SegmentationClassAug" not in label_path:
+            label_path = label_path.replace("SegmentationClass", "SegmentationClassAug")
+        
+        # 验证标签路径是否存在
+        if not os.path.exists(label_path):
+            raise FileNotFoundError(f"标签文件不存在: {label_path}")
         
         # 图像读取保持不变（RGB模式）
         image = self.img_loader(image_path, "RGB")

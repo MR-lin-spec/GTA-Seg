@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
     BASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    basenames = scan_real_pairs_basename(VOC2012_ROOT, "JPEGImages", "SegmentationClass")
+    basenames = scan_real_pairs_basename(VOC2012_ROOT, "JPEGImages", "SegmentationClassAug")
     print(f"磁盘上真实存在的图片-标签对：{len(basenames)} 组")
 
     ratios = [1, 1/2, 1/4, 1/8, 1/16]

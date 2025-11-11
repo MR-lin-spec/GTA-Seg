@@ -2,7 +2,7 @@ dataset: # Required.
   type: pascal_semi
   train:
     data_root: /root/autodl-tmp/VOC2012
-    data_list: /root/GTA-Seg/data/splits_pascal/original_0.25/labeled.txt
+    data_list: /root/GTA-Seg/data/splits_pascal/original_0.5/labeled.txt
     flip: True
     GaussianBlur: False
     rand_resize: [0.5, 2.0]
